@@ -1,5 +1,6 @@
 import argparse
 import onnx
+from qonnx.core import data_layout
 from qonnx.core.datatype import DataType
 from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.custom_op.registry import getCustomOp
@@ -355,6 +356,7 @@ def my_step_convert_to_hls(model: ModelWrapper, cfg: build_cfg.DataflowBuildConf
 cfg_estimates = build.DataflowBuildConfig(
     enable_build_pdb_debug=False,
     verbose             = True,
+    output_dir          = "build",
     mvau_wwidth_max     = 1024,
     target_fps          = 60,
     synth_clk_period_ns = 5.0,
