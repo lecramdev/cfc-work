@@ -214,17 +214,21 @@ class MergeReshapeConcat(Transformation):
 
         return (model, False)
 
-class MvauUseDsp(Transformation):
+class SetFpgaResourceTypes(Transformation):
     def apply(self, model: ModelWrapper):
         for n in model.graph.node:
             if n.op_type == "MatrixVectorActivation":
                 node = getCustomOp(n)
                 if node.get_nodeattr("binaryXnorMode") == 0:
                     node.set_nodeattr("resType", "dsp")
+            if n.op_type == "ConvolutionInputGenerator":
+                node = getCustomOp(n)
+                node.set_nodeattr("ram_style", "block")
         return (model, False)
 
 def my_preprocess(model: ModelWrapper, cfg: build_cfg.DataflowBuildConfig):
     model.set_tensor_datatype(model.graph.input[0].name, DataType["UINT8"])
+    model.set_tensor_layout(model.graph.input[0].name, data_layout.NCHW)
     model = model.transform(RemoveUnusedOuputs())
 
     # Remove first quantization so that UINT8 data can be used directly
@@ -235,6 +239,17 @@ def my_preprocess(model: ModelWrapper, cfg: build_cfg.DataflowBuildConfig):
     model.graph.input.append(new_input_tensor)
     new_input_index = model.get_node_index(new_input_node)
     del model.graph.node[0:new_input_index]
+
+    # Discard everything after the first few layers (for faster testing)
+    # new_output_node = model.get_nodes_by_op_type("Mul")[22]
+    # new_output_tensor = model.get_tensor_valueinfo(new_output_node.output[0])
+    # # old_output_tensor = model.graph.output[0]
+    # # model.graph.output.remove(old_output_tensor)
+    # del model.graph.output[:]
+    # model.graph.output.append(new_output_tensor)
+    # new_output_index = model.get_node_index(new_output_node)
+    # del model.graph.node[new_output_index+1:-1]
+    # model.graph.node.remove(model.get_nodes_by_op_type("Concat")[0])
 
     # remove redundant value_info for primary input/output
     # othwerwise, newer FINN versions will not accept the model
@@ -306,7 +321,6 @@ def my_step_convert_to_hls(model: ModelWrapper, cfg: build_cfg.DataflowBuildConf
     model = model.transform(to_hls.InferBinaryMatrixVectorActivation(mem_mode))
     # needed for non-bipolar MatMul layers
     model = model.transform(to_hls.InferQuantizedMatrixVectorActivation(mem_mode))
-    model = model.transform(MvauUseDsp())
     # TopK to LabelSelect
     model = model.transform(to_hls.InferLabelSelectLayer())
     # input quantization (if any) as standalone threshold
@@ -328,7 +342,7 @@ def my_step_convert_to_hls(model: ModelWrapper, cfg: build_cfg.DataflowBuildConf
     # get rid of Tranpose -> Tranpose identity seq
     model = model.transform(absorb.AbsorbConsecutiveTransposes())
 
-
+    model = model.transform(SetFpgaResourceTypes())
     model = model.transform(GiveUniqueNodeNames())
     model = model.transform(InferDataLayouts())
     return model
@@ -339,14 +353,12 @@ def my_step_convert_to_hls(model: ModelWrapper, cfg: build_cfg.DataflowBuildConf
 # args = parser.parse_args()
 
 cfg_estimates = build.DataflowBuildConfig(
-    enable_build_pdb_debug=True,
+    enable_build_pdb_debug=False,
     verbose             = True,
-    output_dir          = "build",
-    mvau_wwidth_max     = 256,
-    target_fps          = 200,
+    mvau_wwidth_max     = 1024,
+    target_fps          = 60,
     synth_clk_period_ns = 5.0,
     rtlsim_batch_size   = 32,
-    # fpga_part           = "xc7z020clg400-1",
     board               = "U280",
     shell_flow_type     = build_cfg.ShellFlowType.VITIS_ALVEO,
 
@@ -354,10 +366,12 @@ cfg_estimates = build.DataflowBuildConfig(
     force_python_rtlsim = True,
     auto_fifo_depths    = True,
     # folding_config_file = "depth_config.json",
-    verify_save_rtlsim_waveforms = True,
+    # verify_save_rtlsim_waveforms = True,
 
-    start_step          = "step_synthesize_bitfile",
-    # stop_step           = "step_measure_rtlsim_performance",
+    force_rtl_conv_inp_gen = True,
+
+    # start_step          = "step_set_fifo_depths",
+    # stop_step           = "step_set_fifo_depths",
     steps               = [
                             "step_qonnx_to_finn",
                             my_preprocess,
