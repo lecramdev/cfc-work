@@ -242,15 +242,14 @@ def my_preprocess(model: ModelWrapper, cfg: build_cfg.DataflowBuildConfig):
     del model.graph.node[0:new_input_index]
 
     # Discard everything after the first few layers (for faster testing)
-    # new_output_node = model.get_nodes_by_op_type("Mul")[22]
+    # model = model.transform(SortGraph())
+    # new_output_node = model.get_nodes_by_op_type("Concat")[1]
     # new_output_tensor = model.get_tensor_valueinfo(new_output_node.output[0])
-    # # old_output_tensor = model.graph.output[0]
-    # # model.graph.output.remove(old_output_tensor)
     # del model.graph.output[:]
     # model.graph.output.append(new_output_tensor)
     # new_output_index = model.get_node_index(new_output_node)
     # del model.graph.node[new_output_index+1:-1]
-    # model.graph.node.remove(model.get_nodes_by_op_type("Concat")[0])
+    # model = model.transform(SortGraph())
 
     # remove redundant value_info for primary input/output
     # othwerwise, newer FINN versions will not accept the model
@@ -268,6 +267,10 @@ def my_step_streamline(model: ModelWrapper, cfg: build_cfg.DataflowBuildConfig):
     Streamlining requires careful topology design and cannot be applied to all
     topologies.
     """
+    try:
+        os.mkdir(cfg.output_dir + f"/streamline")
+    except:
+        pass
 
     streamline_transformations = [
         absorb.AbsorbSignBiasIntoMultiThreshold(),
@@ -300,8 +303,11 @@ def my_step_streamline(model: ModelWrapper, cfg: build_cfg.DataflowBuildConfig):
         GiveUniqueNodeNames(),
         GiveReadableTensorNames(),
     ]
-    for trn in streamline_transformations:
-        model = model.transform(trn)
+    for i, trn in enumerate(streamline_transformations):
+        if isinstance(trn, str):
+            model.save(cfg.output_dir + f"/streamline/{trn}.onnx")
+        else:
+            model = model.transform(trn)
 
     if build_cfg.VerificationStepType.STREAMLINED_PYTHON in cfg._resolve_verification_steps():
         verify_step(model, cfg, "streamlined_python", need_parent=False)
@@ -370,7 +376,7 @@ cfg_estimates = build.DataflowBuildConfig(
     # folding_config_file = "depth_config.json",
     # verify_save_rtlsim_waveforms = True,
 
-    force_rtl_conv_inp_gen = True,
+    # force_rtl_conv_inp_gen = True,
 
     # start_step          = "step_set_fifo_depths",
     # stop_step           = "step_set_fifo_depths",
