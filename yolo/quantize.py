@@ -1,5 +1,7 @@
 import argparse
 from copy import deepcopy
+from brevitas.core.function_wrapper.ops_ste import CeilSte
+from brevitas.inject.enum import RestrictValueType
 from brevitas.quant_tensor import _unpack_quant_tensor
 import torch
 import torch.nn as nn
@@ -16,7 +18,7 @@ from brevitas.export import export_qonnx
 import brevitas.nn as qnn
 import brevitas.quant as quant
 
-# from qonnx.util.cleanup import cleanup as qonnx_cleanup
+from qonnx.util.cleanup import cleanup as qonnx_cleanup
 # from qonnx.core.modelwrapper import ModelWrapper
 # from qonnx.core.datatype import DataType
 # from qonnx.transformation.base import Transformation
@@ -145,20 +147,32 @@ def my_quantize(
     config.IGNORE_MISSING_KEYS = ignore_missing_keys_state
     return graph_model
 
-ACT_BIT_WIDTH = 5
+class Uint8ActPerTensorPoT(quant.Uint8ActPerTensorFloat):
+    restrict_scaling_type = RestrictValueType.POWER_OF_TWO
+    restrict_value_float_to_int_impl = CeilSte
+
+class Int8ActPerTensorPoT(quant.Int8ActPerTensorFloat):
+    restrict_scaling_type = RestrictValueType.POWER_OF_TWO
+    restrict_value_float_to_int_impl = CeilSte
+
+class Int8WeightPerChannelPoT(quant.Int8WeightPerChannelFloat):
+    restrict_scaling_type = RestrictValueType.POWER_OF_TWO
+    restrict_value_float_to_int_impl = CeilSte
+
+ACT_BIT_WIDTH = 6
 WEIGHT_BIT_WIDTH = 6
 compute_map = {
     nn.Conv2d: (
         qnn.QuantConv2d,
         {
-            'weight_quant': quant.Int8WeightPerTensorFloat,
+            'weight_quant': Int8WeightPerChannelPoT,
             'weight_bit_width': WEIGHT_BIT_WIDTH,
             # 'bias_quant': quant.Int32Bias,
             'return_quant_tensor': True}),
     nn.ConvTranspose2d: (
         qnn.QuantConvTranspose2d,
         {
-            'weight_quant': quant.Int8WeightPerTensorFloat,
+            'weight_quant': Int8WeightPerChannelPoT,
             'weight_bit_width': WEIGHT_BIT_WIDTH,
             # 'bias_quant': quant.Int32Bias,
             'return_quant_tensor': True}),
@@ -168,36 +182,36 @@ compute_map = {
 unsigned_act = (nn.ReLU,)
 act_map = {
     nn.ReLU: (qnn.QuantReLU, {
-        'act_quant': quant.Uint8ActPerTensorFloat, 'bit_width': ACT_BIT_WIDTH, 'return_quant_tensor': True})}
+        'act_quant': Uint8ActPerTensorPoT, 'bit_width': ACT_BIT_WIDTH, 'return_quant_tensor': True})}
 identity_map = {
     'signed':
         (qnn.QuantIdentity, {
-            'act_quant': quant.Int8ActPerTensorFloat, 'bit_width': ACT_BIT_WIDTH, 'return_quant_tensor': True}),
+            'act_quant': Int8ActPerTensorPoT, 'bit_width': ACT_BIT_WIDTH, 'return_quant_tensor': True}),
     'signed8':
         (qnn.QuantIdentity, {
-            'act_quant': quant.Int8ActPerTensorFloat, 'bit_width': 8, 'return_quant_tensor': True}),
+            'act_quant': Int8ActPerTensorPoT, 'bit_width': 8, 'return_quant_tensor': True}),
     'unsigned':
         (qnn.QuantIdentity, {
-            'act_quant': quant.Uint8ActPerTensorFloat, 'bit_width': ACT_BIT_WIDTH, 'return_quant_tensor': True}),
+            'act_quant': Uint8ActPerTensorPoT, 'bit_width': ACT_BIT_WIDTH, 'return_quant_tensor': True}),
     'unsigned8':
         (qnn.QuantIdentity, {
-            'act_quant': quant.Uint8ActPerTensorFloat, 'bit_width': 8, 'return_quant_tensor': True})}
+            'act_quant': Uint8ActPerTensorPoT, 'bit_width': 8, 'return_quant_tensor': True})}
 
 
 ACT_BIT_WIDTH_DETECT = 6
-WEIGHT_BIT_WIDTH_DETECT = 8
+WEIGHT_BIT_WIDTH_DETECT = 6
 compute_map_detect = {
     nn.Conv2d: (
         qnn.QuantConv2d,
         {
-            'weight_quant': quant.Int8WeightPerTensorFloat,
+            'weight_quant': Int8WeightPerChannelPoT,
             'weight_bit_width': WEIGHT_BIT_WIDTH_DETECT,
             # 'bias_quant': quant.Int32Bias,
             'return_quant_tensor': True}),
     nn.ConvTranspose2d: (
         qnn.QuantConvTranspose2d,
         {
-            'weight_quant': quant.Int8WeightPerTensorFloat,
+            'weight_quant': Int8WeightPerChannelPoT,
             'weight_bit_width': WEIGHT_BIT_WIDTH_DETECT,
             # 'bias_quant': quant.Int32Bias,
             'return_quant_tensor': True}),
@@ -207,22 +221,22 @@ compute_map_detect = {
 unsigned_act_detect = (nn.ReLU,)
 act_map_detect = {
     nn.ReLU: (qnn.QuantReLU, {
-        'act_quant': quant.Uint8ActPerTensorFloat, 'bit_width': ACT_BIT_WIDTH_DETECT, 'return_quant_tensor': True})}
+        'act_quant': Uint8ActPerTensorPoT, 'bit_width': ACT_BIT_WIDTH_DETECT, 'return_quant_tensor': True})}
 identity_map_detect = {
     'signed':
         (qnn.QuantIdentity, {
-            'act_quant': quant.Int8ActPerTensorFloat, 'bit_width': ACT_BIT_WIDTH_DETECT, 'return_quant_tensor': True}),
+            'act_quant': Int8ActPerTensorPoT, 'bit_width': ACT_BIT_WIDTH_DETECT, 'return_quant_tensor': True}),
     'signed8':
         (qnn.QuantIdentity, {
-            'act_quant': quant.Int8ActPerTensorFloat, 'bit_width': 8, 'return_quant_tensor': True}),
+            'act_quant': Int8ActPerTensorPoT, 'bit_width': 8, 'return_quant_tensor': True}),
     'unsigned':
         (qnn.QuantIdentity, {
-            'act_quant': quant.Uint8ActPerTensorFloat, 'bit_width': ACT_BIT_WIDTH_DETECT, 'return_quant_tensor': True}),
+            'act_quant': Uint8ActPerTensorPoT, 'bit_width': ACT_BIT_WIDTH_DETECT, 'return_quant_tensor': True}),
     'unsigned8':
         (qnn.QuantIdentity, {
-            'act_quant': quant.Uint8ActPerTensorFloat, 'bit_width': 8, 'return_quant_tensor': True})}
+            'act_quant': Uint8ActPerTensorPoT, 'bit_width': 8, 'return_quant_tensor': True})}
 parser = argparse.ArgumentParser()
-parser.add_argument("-o", nargs=1, default="models/quantized_yolo.onnx")
+parser.add_argument("-o", nargs=1, default=["models/quantized_yolo.onnx"])
 parser.add_argument("--test", action="store_true")
 args = parser.parse_args()
 
@@ -244,28 +258,6 @@ else:
 # quantized = pre #my_quantize(pre, identity_map, compute_map, act_map, unsigned_act, True)
 
 SIZE = 320
-# dataloader = inference_util.get_dataloader("images", SIZE)
-# quantized.to(device)
-# with torch.no_grad():
-#     print("Calibrate:")
-#     with calibration_mode(quantized):
-#         for x, _ in tqdm(dataloader):
-#             # quantized(torch.rand((1,3,SIZE,SIZE)))
-#             x = x.to(device)
-#             quantized(x)
-#     print("Bias Correction:")
-#     with bias_correction_mode(quantized):
-#         for x, _ in tqdm(dataloader):
-#             # quantized(torch.rand((1,3,SIZE,SIZE)))
-#             x = x.to(device)
-#             quantized(x)
-
-# export_qonnx(quantized, export_path=args.o[0], args=torch.rand((1, 3, SIZE, SIZE)))
-# # export_qonnx(quantized, export_path=args.o[0], args=torch.rand((1, 3, 8, 8)))
-# qonnx_cleanup(args.o[0], out_file=args.o[0])
-
-if not args.test:
-    exit()
 
 class UnpackTensors(torch.nn.Module):
     def __init__(self) -> None:
@@ -380,7 +372,7 @@ def get_model(cfg=None, weights=None, nc=20, verbose=True):
         model.load(weights)
     else:
         # model.load_state_dict(torch.load("weights.pth"))
-        model.load(torch.load("quant_yolo/d0.167_w0.25_c1024_relu_yolo/weights/best.pt", map_location=device))
+        model.load(torch.load("quant_yolo/d0.167_w0.2_c1024_relu_yolo/weights/best.pt", map_location=device))
     print("Quantize Model")
     model.quantize()
     return model
@@ -415,29 +407,30 @@ class MyTrainer(DetectionTrainer):
                     LOGGER.info(f'\nValidating {f}...')
                     self.model.load_state_dict(torch.load(f))
                     self.validator.args.plots = self.args.plots
-                    self.metrics = self.validator(model=self.model)
+                    self.metrics = self.validator(model=deepcopy(self.model))
                     self.metrics.pop('fitness', None)
                     self.run_callbacks('on_fit_epoch_end')
 
     def _setup_train(self, world_size):
         super()._setup_train(world_size)
         self.ema.enabled = False
-        self.validator(model=deepcopy(self.model))
+        self.ema.ema = None
+        # self.validator(model=deepcopy(self.model))
 
-# get_model("myyolov6n.yaml")
+# model = get_model("myyolov6n.yaml")
 
 yolo = YOLO("myyolov6n.yaml", "detect")
-# # yolo.model.model = inf_model
-# # # yolo = YOLO("models/best.pt")
-# # yolo.val(data="VOC.yaml", half=False, imgsz=SIZE, device=device)
+# yolo.model = model
+# yolo = YOLO("models/best.pt")
+# yolo.val(data="VOC.yaml", half=False, imgsz=SIZE, batch=64, device=device)
 
 yolo.train(
     data='VOC.yaml', imgsz=SIZE,
-    epochs=1, patience=5,
-    plots=True, device=0, cache=False, amp=False,
+    epochs=1000, patience=50, batch=128,
+    plots=True, device=device, cache=False, amp=False,
     half=False,
     pretrained=True, resume=True,
-    lr0=0.0001,
+    lr0=0.00001,
     momentum=0.9,
     warmup_epochs=0,
     optimizer="SGD",
@@ -446,4 +439,22 @@ yolo.train(
     # freeze=freeze,
     #fraction=0.1,
     project="qat_yolo",
-    name="test")
+    name="d0.167_w0.2_c1024_relu_fullpot_w6a6_yolo")
+
+yolo.model.eval().to(device)
+dataloader = inference_util.get_dataloader("images", SIZE)
+with torch.no_grad():
+   for i, (x, _) in enumerate(tqdm(dataloader, desc="Sample images")):
+       results = inference_util.infer(yolo.model, x.to(device), SIZE)
+       for res in results:
+           annotated = res.plot()
+           annotated = Image.fromarray(annotated)
+           annotated.save(f"out_imgs/{i}.jpg")
+       # break
+
+inference_util.print_stats()
+
+print("Export model to:", args.o[0])
+export_model = torch.nn.Sequential(yolo.model.model[0:2])
+export_qonnx(export_model, export_path=args.o[0], args=torch.rand((1, 3, SIZE, SIZE), device=device))
+qonnx_cleanup(args.o[0], out_file=args.o[0])
